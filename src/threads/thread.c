@@ -4,6 +4,7 @@
 #include <random.h>
 #include <stdio.h>
 #include <string.h>
+#include "devices/timer.h"
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
@@ -24,7 +25,7 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
-/* List of all processes in sleeping state*/
+/* List of all processes in sleeping state */
 static struct list sleeping_list;
 
 /* List of all processes.  Processes are added to this list
@@ -73,6 +74,7 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+bool wakeup_less_func(const struct list_elem *a, const struct list_elem *b, void *aux);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -318,18 +320,25 @@ thread_yield (void)
   intr_set_level (old_level);
 }
 
-/* Returns true if the value of WAKEUP_TICK for A is less than 
-   the value of WAKEUP_TICK for B. Otherwise, returns false. */
-list_less_func *
-cmp_wakeup_tick (const struct list_elem *a, const struct list_elem *b, void *aux)
+/* Compares two threads based on their wakeup ticks. This function
+   is used as a comparison function for sorting threads in a list
+   based on their wakeup ticks. It compares the wakeup ticks of two
+   threads and returns true if the wakeup tick of thread 'a' is less
+   than the wakeup tick of thread 'b', and false otherwise. */
+bool
+wakeup_less_func (const struct list_elem *a, const struct list_elem *b, void *aux)
 {
-  struct thread *ta = list_entry (a, struct thread, elem);
-  struct thread *tb = list_entry (b, struct thread, elem);
+  struct thread *ta, *tb; 
+  
+  ta = list_entry (a, struct thread, elem);
+  tb = list_entry (b, struct thread, elem);
+
   return ta->wakeup_tick < tb->wakeup_tick;
 }
 
-/* The current thread is put to sleep and may only be
-   scheduled again after TICK is greater than WAKEUP_TICK. */
+/* Suspends the execution of the current thread until the specified
+   wakeup_tick. The thread is added to the sleeping_list in an ordered
+   manner based on the wakeup_tick. */
 void
 thread_sleep (int64_t wakeup_tick) 
 {
@@ -342,15 +351,17 @@ thread_sleep (int64_t wakeup_tick)
   if (cur != idle_thread)
     {
       cur->wakeup_tick = wakeup_tick;
-      list_insert_ordered (&sleeping_list, &cur->elem, cmp_wakeup_tick, NULL);
+      list_insert_ordered (&sleeping_list, &cur->elem, wakeup_less_func, NULL);
     }
   cur->status = THREAD_BLOCKED;
   schedule ();
   intr_set_level (old_level);
 }
 
-/* Unblocks all sleeping threads whose value of
-   WAKEUP_TICK is less than the value of TICK. */
+/* Wakes up threads that have finished sleeping and moves them
+   to the ready list. Threads are woken up based on their
+   wakeup_tick value. This function is called periodically by
+   the timer interrupt handler. */
 void
 thread_wakeup (void)
 {
@@ -362,7 +373,7 @@ thread_wakeup (void)
     {
       struct thread *t = list_entry (e, struct thread, elem);
       
-      if (t->wakeup_tick > timer_ticks ())
+      if (timer_ticks () < t->wakeup_tick)
         break;
 
       list_remove (&t->elem);
