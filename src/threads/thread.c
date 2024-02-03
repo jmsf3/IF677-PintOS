@@ -320,11 +320,12 @@ thread_yield (void)
 
 /* Returns true if the value of WAKEUP_TICK for A is less than 
    the value of WAKEUP_TICK for B. Otherwise, returns false. */
-list_less_func *cmp_wakeup_tick (const struct list_elem *a, const struct list_elem *b, void *aux)
+list_less_func *
+cmp_wakeup_tick (const struct list_elem *a, const struct list_elem *b, void *aux)
 {
-  int64_t wakeup_tick_a = list_entry(a, struct thread, elem)->wakeup_tick;
-  int64_t wakeup_tick_b = list_entry(b, struct thread, elem)->wakeup_tick;
-  return wakeup_tick_a < wakeup_tick_b;
+  struct thread *ta = list_entry (a, struct thread, elem);
+  struct thread *tb = list_entry (b, struct thread, elem);
+  return ta->wakeup_tick < tb->wakeup_tick;
 }
 
 /* The current thread is put to sleep and may only be
@@ -343,7 +344,8 @@ thread_sleep (int64_t wakeup_tick)
       cur->wakeup_tick = wakeup_tick;
       list_insert_ordered (&sleeping_list, &cur->elem, cmp_wakeup_tick, NULL);
     }
-  thread_block();
+  cur->status = THREAD_BLOCKED;
+  schedule ();
   intr_set_level (old_level);
 }
 
@@ -352,26 +354,22 @@ thread_sleep (int64_t wakeup_tick)
 void
 thread_wakeup (void)
 {
-  struct list_elem *e;
+  struct list_elem *e = list_begin (&sleeping_list);
   enum intr_level old_level;
 
-  ASSERT (intr_get_level () == INTR_OFF);
-
   old_level = intr_disable ();
-  for (e = list_begin (&sleeping_list); e != list_end (&all_list);
-       e = list_next (e))
+  while (e != list_end (&sleeping_list))
     {
       struct thread *t = list_entry (e, struct thread, elem);
+      
+      if (t->wakeup_tick > timer_ticks ())
+        break;
 
-      if (t->wakeup_tick <= timer_ticks ())
-        {
-          list_remove (&t->elem);
-          thread_unblock(t);
-        }
-      else
-        {
-          break;
-        }
+      list_remove (&t->elem);
+      list_push_back (&ready_list, &t->elem);
+      t->status = THREAD_READY;
+
+      e = list_next (e);
     }
   intr_set_level (old_level);
 }
