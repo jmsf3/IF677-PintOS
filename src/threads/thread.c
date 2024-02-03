@@ -24,6 +24,9 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+/* List of all processes in sleeping state*/
+static struct list sleeping_list;
+
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
@@ -91,6 +94,7 @@ thread_init (void)
 
   lock_init (&tid_lock);
   list_init (&ready_list);
+  list_init (&sleeping_list);
   list_init (&all_list);
 
   /* Set up a thread structure for the running thread. */
@@ -314,6 +318,64 @@ thread_yield (void)
   intr_set_level (old_level);
 }
 
+/* Returns true if the value of WAKEUP_TICK for A is less than 
+   the value of WAKEUP_TICK for B. Otherwise, returns false. */
+list_less_func *cmp_wakeup_tick (const struct list_elem *a, const struct list_elem *b, void *aux)
+{
+  int64_t wakeup_tick_a = list_entry(a, struct thread, elem)->wakeup_tick;
+  int64_t wakeup_tick_b = list_entry(b, struct thread, elem)->wakeup_tick;
+  return wakeup_tick_a < wakeup_tick_b;
+}
+
+/* The current thread is put to sleep and may only be
+   scheduled again after TICK is greater than WAKEUP_TICK. */
+void
+thread_sleep (int64_t wakeup_tick) 
+{
+  struct thread *cur = thread_current ();
+  enum intr_level old_level;
+  
+  ASSERT (!intr_context ());
+
+  old_level = intr_disable ();
+  if (cur != idle_thread)
+    {
+      cur->wakeup_tick = wakeup_tick;
+      list_insert_ordered (&sleeping_list, &cur->elem, cmp_wakeup_tick, NULL);
+    }
+  thread_block();
+  intr_set_level (old_level);
+}
+
+/* Unblocks all sleeping threads whose value of
+   WAKEUP_TICK is less than the value of TICK. */
+void
+thread_wakeup (void)
+{
+  struct list_elem *e;
+  enum intr_level old_level;
+
+  ASSERT (intr_get_level () == INTR_OFF);
+
+  old_level = intr_disable ();
+  for (e = list_begin (&sleeping_list); e != list_end (&all_list);
+       e = list_next (e))
+    {
+      struct thread *t = list_entry (e, struct thread, elem);
+
+      if (t->wakeup_tick <= timer_ticks ())
+        {
+          list_remove (&t->elem);
+          thread_unblock(t);
+        }
+      else
+        {
+          break;
+        }
+    }
+  intr_set_level (old_level);
+}
+
 /* Invoke function 'func' on all threads, passing along 'aux'.
    This function must be called with interrupts off. */
 void
@@ -462,6 +524,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->wakeup_tick = 0;
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
