@@ -372,6 +372,7 @@ thread_wakeup (void)
   while (e != list_end (&sleeping_list))
     {
       struct thread *t = list_entry (e, struct thread, elem);
+      e = list_next (e);
       
       if (timer_ticks () < t->wakeup_tick)
         break;
@@ -379,8 +380,6 @@ thread_wakeup (void)
       list_remove (&t->elem);
       list_push_back (&ready_list, &t->elem);
       t->status = THREAD_READY;
-
-      e = list_next (e);
     }
   intr_set_level (old_level);
 }
