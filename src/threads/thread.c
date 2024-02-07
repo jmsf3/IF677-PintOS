@@ -333,7 +333,7 @@ wakeup_less_func (const struct list_elem *a, const struct list_elem *b, void *au
   ta = list_entry (a, struct thread, elem);
   tb = list_entry (b, struct thread, elem);
 
-  return ta->wakeup_tick < tb->wakeup_tick;
+  return thread_get_wakeup_tick (ta) < thread_get_wakeup_tick (tb);
 }
 
 /* Suspends the execution of the current thread until the specified
@@ -350,7 +350,7 @@ thread_sleep (int64_t wakeup_tick)
   old_level = intr_disable ();
   if (cur != idle_thread)
     {
-      cur->wakeup_tick = wakeup_tick;
+      thread_set_wakeup_tick (cur, wakeup_tick);
       list_insert_ordered (&sleeping_list, &cur->elem, wakeup_less_func, NULL);
     }
   cur->status = THREAD_BLOCKED;
@@ -374,7 +374,7 @@ thread_wakeup (void)
       struct thread *t = list_entry (e, struct thread, elem);
       e = list_next (e);
       
-      if (timer_ticks () < t->wakeup_tick)
+      if (timer_ticks () < thread_get_wakeup_tick (t))
         break;
 
       list_remove (&t->elem);
@@ -413,6 +413,20 @@ int
 thread_get_priority (void) 
 {
   return thread_current ()->priority;
+}
+
+/* Sets the wakeup tick for a thread. */
+void
+thread_set_wakeup_tick (struct thread *t, int64_t wakeup_tick)
+{
+  t->wakeup_tick = wakeup_tick;
+}
+
+/* Returns the wakeup tick of a thread. */
+int64_t
+thread_get_wakeup_tick (struct thread *t)
+{
+  return t->wakeup_tick;
 }
 
 /* Sets the current thread's nice value to NICE. */
