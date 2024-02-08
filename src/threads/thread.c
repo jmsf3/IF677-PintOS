@@ -74,7 +74,34 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
-bool wakeup_less_func(const struct list_elem *a, const struct list_elem *b, void *aux);
+
+/* Compares the priority of two threads. This function is used as a
+   comparator for sorting threads in a list based on their priority. */
+bool cmp_priority (const struct list_elem *a,
+                   const struct list_elem *b, void *aux)
+{
+  struct thread *ta, *tb; 
+  
+  ta = list_entry (a, struct thread, elem);
+  tb = list_entry (b, struct thread, elem);
+
+  return ta->priority > tb->priority; 
+}
+
+/* Compares two threads based on their wakeup ticks. This function
+   is used as a comparator for sorting threads in a list based on
+   their wakeup ticks. */
+bool
+cmp_wakeup_tick (const struct list_elem *a,
+                 const struct list_elem *b, void *aux)
+{
+  struct thread *ta, *tb; 
+  
+  ta = list_entry (a, struct thread, elem);
+  tb = list_entry (b, struct thread, elem);
+
+  return ta->wakeup_tick < tb->wakeup_tick;
+}
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -207,6 +234,11 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  /* If the newly inserted thread has higher priority
+     than the current thread, yield the CPU */
+  if (priority > thread_get_priority ())
+    thread_yield ();
+
   return tid;
 }
 
@@ -243,7 +275,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered (&ready_list, &t->elem, cmp_priority, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -314,26 +346,10 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+    list_insert_ordered (&ready_list, &cur->elem, cmp_priority, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
-}
-
-/* Compares two threads based on their wakeup ticks. This function
-   is used as a comparison function for sorting threads in a list
-   based on their wakeup ticks. It compares the wakeup ticks of two
-   threads and returns true if the wakeup tick of thread 'a' is less
-   than the wakeup tick of thread 'b', and false otherwise. */
-bool
-wakeup_less_func (const struct list_elem *a, const struct list_elem *b, void *aux)
-{
-  struct thread *ta, *tb; 
-  
-  ta = list_entry (a, struct thread, elem);
-  tb = list_entry (b, struct thread, elem);
-
-  return thread_get_wakeup_tick (ta) < thread_get_wakeup_tick (tb);
 }
 
 /* Suspends the execution of the current thread until the specified
@@ -351,7 +367,7 @@ thread_sleep (int64_t wakeup_tick)
   if (cur != idle_thread)
     {
       thread_set_wakeup_tick (cur, wakeup_tick);
-      list_insert_ordered (&sleeping_list, &cur->elem, wakeup_less_func, NULL);
+      list_insert_ordered (&sleeping_list, &cur->elem, cmp_wakeup_tick, NULL);
     }
   cur->status = THREAD_BLOCKED;
   schedule ();
@@ -378,7 +394,7 @@ thread_wakeup (void)
         break;
 
       list_remove (&t->elem);
-      list_push_back (&ready_list, &t->elem);
+      list_insert_ordered (&ready_list, &t->elem, cmp_priority, NULL);
       t->status = THREAD_READY;
     }
   intr_set_level (old_level);
@@ -401,11 +417,18 @@ thread_foreach (thread_action_func *func, void *aux)
     }
 }
 
-/* Sets the current thread's priority to NEW_PRIORITY. */
+/* Sets the current thread's priority to NEW_PRIORITY. If the current
+   thread no longer has the highest priority, yields the CPU. */
 void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+  
+  int max_priority = list_entry (list_begin (&ready_list),
+                                 struct thread, elem)->priority;
+  
+  if (new_priority < max_priority)
+    thread_yield ();
 }
 
 /* Returns the current thread's priority. */
