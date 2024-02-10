@@ -78,7 +78,7 @@ static tid_t allocate_tid (void);
 /* Compares the priority of two threads. This function is used as a
    comparator for sorting threads in a list based on their priority. */
 bool cmp_priority (const struct list_elem *a,
-                   const struct list_elem *b, void *aux)
+                   const struct list_elem *b, void *aux UNUSED)
 {
   struct thread *ta, *tb; 
   
@@ -93,7 +93,7 @@ bool cmp_priority (const struct list_elem *a,
    their wakeup ticks. */
 bool
 cmp_wakeup_tick (const struct list_elem *a,
-                 const struct list_elem *b, void *aux)
+                 const struct list_elem *b, void *aux UNUSED)
 {
   struct thread *ta, *tb; 
   
@@ -400,6 +400,19 @@ thread_wakeup (void)
   intr_set_level (old_level);
 }
 
+/* Checks if the current thread's priority is lower than the maximum
+   priority of the threads in the ready list. If so, it yields the CPU
+   to a higher priority thread. */
+void
+thread_preempt (void)
+{
+  int max_priority = list_entry (list_begin (&ready_list),
+                                 struct thread, elem)->priority;
+  
+  if (thread_get_priority () < max_priority)
+    thread_yield ();
+}
+
 /* Invoke function 'func' on all threads, passing along 'aux'.
    This function must be called with interrupts off. */
 void
@@ -423,12 +436,7 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
-  
-  int max_priority = list_entry (list_begin (&ready_list),
-                                 struct thread, elem)->priority;
-  
-  if (new_priority < max_priority)
-    thread_yield ();
+  thread_preempt ();
 }
 
 /* Returns the current thread's priority. */
