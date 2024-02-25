@@ -162,6 +162,20 @@ sema_test_helper (void *sema_)
     }
 }
 
+/* Compares two lock elements based on their priority. This function
+   is used as a comparator for sorting lock elements in a list. */
+bool 
+cmp_lock (const struct list_elem *a,
+          const struct list_elem *b, void *aux UNUSED)
+{
+  struct lock *la, *lb; 
+  
+  la = list_entry (a, struct lock, elem);
+  lb = list_entry (b, struct lock, elem);
+
+  return la->priority > lb->priority; 
+}
+
 /* Initializes LOCK.  A lock can be held by at most a single
    thread at any given time.  Our locks are not "recursive", that
    is, it is an error for the thread currently holding a lock to
@@ -183,6 +197,7 @@ lock_init (struct lock *lock)
   ASSERT (lock != NULL);
 
   lock->holder = NULL;
+  lock->priority = PRI_MIN;
   sema_init (&lock->semaphore, 1);
 }
 
@@ -201,8 +216,18 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
+  if (lock->holder)
+    {
+      thread_current ()->waiting_lock = lock;
+      thread_donate_priority ();
+    }
+
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
+  
+  thread_current ()->waiting_lock = NULL;
+  list_insert_ordered (&thread_current ()->locks,
+                       &lock->elem, cmp_lock, NULL);
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -238,6 +263,9 @@ lock_release (struct lock *lock)
 
   lock->holder = NULL;
   sema_up (&lock->semaphore);
+
+  list_remove (&lock->elem);
+  thread_update_priority ();
 }
 
 /* Returns true if the current thread holds LOCK, false
@@ -263,8 +291,8 @@ struct semaphore_elem
    function is used as a comparator for sorting semaphore elements
    in a list. */
 bool 
-cmp_semaphore(const struct list_elem *a,
-              const struct list_elem *b, void *aux UNUSED)
+cmp_semaphore (const struct list_elem *a,
+               const struct list_elem *b, void *aux UNUSED)
 {
   struct semaphore_elem *sa, *sb;
   

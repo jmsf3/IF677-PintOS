@@ -25,7 +25,7 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
-/* List of all processes in sleeping state */
+/* List of all processes in sleeping state. */
 static struct list sleeping_list;
 
 /* List of all processes.  Processes are added to this list
@@ -235,7 +235,7 @@ thread_create (const char *name, int priority,
   thread_unblock (t);
 
   /* If the newly inserted thread has higher priority
-     than the current thread, yield the CPU */
+     than the current thread, yield the CPU. */
   if (priority > thread_get_priority ())
     thread_yield ();
 
@@ -413,6 +413,55 @@ thread_preempt (void)
     thread_yield ();
 }
 
+/* This function is responsible for donating the priority of the
+   current thread to the thread holding the lock it is waiting for.
+   It iteratively donates the priority to all the threads in the
+   chain of locks until it reaches a thread with higher or equal
+   priority. */
+void
+thread_donate_priority (void)
+{
+  struct thread *t = thread_current();
+  struct lock *lock = t->waiting_lock;
+
+  if (lock->holder == NULL)
+    lock->priority = t->priority;
+
+  while (lock && t->priority > lock->holder->priority) 
+    {
+      lock->holder->priority = t->priority;
+      thread_preempt ();
+
+      if (t->priority > lock->priority)
+        lock->priority = t->priority;
+      
+      t = lock->holder;
+      lock = t->waiting_lock;
+    }
+}
+
+/* Updates the priority of the current thread based on the priority of
+   the highest priority thread that has donated its priority to the
+   current thread. If there are no threads in the donor list, the
+   original priority of the current thread is used. Finally, sets
+   the updated priority as the new priority of the current thread. */
+void
+thread_update_priority (void)
+{
+  struct thread *t = thread_current ();
+  int updated_priority = t->base_priority;
+
+  if (!list_empty (&t->locks))
+    {
+      list_sort (&t->locks, cmp_lock, NULL);
+      struct lock *lock = list_entry (list_front (&t->locks), struct lock, elem);
+      if (lock->priority > updated_priority) updated_priority = lock->priority;
+    }
+
+  t->priority = updated_priority;
+  thread_preempt ();
+}
+
 /* Invoke function 'func' on all threads, passing along 'aux'.
    This function must be called with interrupts off. */
 void
@@ -435,7 +484,18 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  struct thread *t = thread_current();
+
+  /* If the current thread has donated it's priority,
+     then only the base priority is updated. */
+  if (t->priority == t->base_priority)
+    {
+      t->priority = new_priority;
+      t->base_priority = new_priority;
+    }
+  else
+    t->base_priority = new_priority;
+
   thread_preempt ();
 }
 
@@ -579,6 +639,10 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->wakeup_tick = 0;
   t->magic = THREAD_MAGIC;
+
+  t->base_priority = priority;
+  list_init (&t->locks);
+  t->waiting_lock = NULL;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
