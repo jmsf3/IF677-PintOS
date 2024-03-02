@@ -3,7 +3,7 @@ cross-compiler:
 
 PINTOSROOT=$HOME/private/pintos
 
-PREFIX=/afs/ir.stanford.edu/class/cs212/`uname -m`
+PREFIX=/usr/class/cs140/`uname -m`
 PATH=$PATH:$PREFIX/bin
 TMP=`pwd`
 

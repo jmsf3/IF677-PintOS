@@ -611,7 +611,7 @@ thread_update_recent_cpu (void)
 
 /* Updates the load average value of the system based on the 
    number of threads that are ready to run. This function is
-   called periodically by the timer interrupt handler */
+   called periodically by the timer interrupt handler. */
 void
 thread_update_load_avg (void)
 {
