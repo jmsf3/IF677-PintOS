@@ -733,7 +733,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->waiting_lock = NULL;
 
   t->nice = 0;
-  t->recent_cpu = CONVERT_TO_FIXED_POINT (0);
+  t->recent_cpu = 0;
   
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
